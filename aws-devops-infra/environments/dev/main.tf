@@ -39,7 +39,7 @@ module "eks" {
   cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]
 
   eks_managed_node_group_defaults = {
-    instance_types = ["t4g.medium"]
+    instance_types = ["t4g.large"]
     ami_type       = "AL2_ARM_64"
   }
 
@@ -53,6 +53,38 @@ module "eks" {
   enable_cluster_creator_admin_permissions = true
   tags = var.default_tags
 }
+# ─────────────────────────────────────────────
+# Update Kubeconfig Automatically After EKS
+# ─────────────────────────────────────────────
+resource "null_resource" "update_kubeconfig" {
+  provisioner "local-exec" {
+    command = "aws eks update-kubeconfig --region ${var.aws_region} --name ${var.cluster_name}"
+  }
+  triggers = {
+    always_run = timestamp()
+  }
+  depends_on = [module.eks]
+}
+# ─────────────────────────────────────────────
+# Wait for EKS API DNS to become resolvable
+# ─────────────────────────────────────────────
+resource "null_resource" "wait_for_dns" {
+  provisioner "local-exec" {
+    command = <<EOT
+    for i in {1..10}; do
+      nslookup ${module.eks.cluster_endpoint} && exit 0
+      echo "Waiting for EKS endpoint DNS to resolve..."
+      sleep 30
+    done
+    echo "EKS DNS still not resolvable after retries!" && exit 1
+    EOT
+  }
+  depends_on = [module.eks]
+}
+
+# ─────────────────────────────────────────────
+# EKS AWS Auth ConfigMap 
+# ──────────────────────────────────────────
 module "eks_aws_auth" {
   source  = "terraform-aws-modules/eks/aws//modules/aws-auth"
   version = "20.8.3"
@@ -72,7 +104,11 @@ module "eks_aws_auth" {
   providers = {
     kubernetes = kubernetes
   }
-  depends_on = [module.eks]
+  depends_on = [
+    module.eks,
+    null_resource.update_kubeconfig,
+    null_resource.wait_for_dns
+  ]
 }
 # ─────────────────────────────────────────────
 # ALB Controller Setup (IRSA, SA, Helm)
@@ -117,9 +153,10 @@ resource "helm_release" "aws_alb_controller" {
     name  = "vpcId"
     value = module.vpc.vpc_id
   }
-  depends_on = [
-    module.eks
-  ]
+ depends_on = [
+  module.eks,
+  null_resource.update_kubeconfig
+]
 }
 # ─────────────────────────────────────────────
 # RDS PostgreSQL
@@ -239,12 +276,10 @@ module "ecr" {
   repository_name = "${var.project_name}-ecr"
   tags            = var.default_tags
 }
-
 # Pass ECR repository URL to Helm values
 locals {
   app_image_repo = module.ecr.repository_url
 }
-
 # ─────────────────────────────────────────────
 # OpenSearch
 # ─────────────────────────────────────────────
@@ -254,10 +289,10 @@ module "opensearch" {
 
   domain_name    = var.opensearch_domain_name
   engine_version = "OpenSearch_1.3"
-
   cluster_config = {
     instance_type  = "r6g.large.search"
     instance_count = 1
+    zone_awareness_enabled = false
   }
 
   ebs_options = {
@@ -285,7 +320,10 @@ resource "helm_release" "external_secrets_operator" {
   create_namespace = true
   version          = "0.9.10"
   values = []
-  depends_on = [module.eks]
+  depends_on = [
+    module.eks,
+    null_resource.update_kubeconfig
+]
 }
 # ─────────────────────────────────────────────
 # External DNS (IRSA + Helm)
@@ -314,7 +352,10 @@ resource "helm_release" "external_dns" {
     name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
     value = module.external_dns_irsa.externaldns_role_arn
   }
-  depends_on = [module.eks]
+  depends_on = [
+    module.eks,
+    null_resource.update_kubeconfig
+]
 }
 # ─────────────────────────────────────────────
 # Fluent Bit (Centralized Logging)
@@ -330,7 +371,7 @@ resource "helm_release" "fluentbit" {
   values = [
     file("${path.module}/../../fluentbit/values.yaml")
   ]
-  # Dynamically inject OpenSearch output config
+# Dynamically inject OpenSearch output config
 set {
   name  = "extraOutputPlugin"
   value = <<EOT
@@ -350,7 +391,8 @@ EOT
 }
   depends_on = [
     module.eks,
-    module.opensearch
+    module.opensearch,
+    null_resource.update_kubeconfig
   ]
 }
 # ─────────────────────────────────────────────
@@ -360,13 +402,16 @@ resource "helm_release" "kube_prometheus_stack" {
   name             = "kube-prometheus"
   repository       = "https://prometheus-community.github.io/helm-charts"
   chart            = "kube-prometheus-stack"
-  version          = "56.6.0" # You can use latest or pin it
+  version          = "56.6.0"
   namespace        = "monitoring"
   create_namespace = true
   values = [
     file("${path.module}/../../prometheus/values.yaml") 
   ]
-  depends_on = [module.eks]
+  depends_on = [
+   module.eks,
+   null_resource.update_kubeconfig
+]
 }
 # ─────────────────────────────────────────────
 # StatusPage App Deployment (via Helm Chart)
@@ -430,14 +475,7 @@ resource "helm_release" "statuspage_app" {
   }
   depends_on = [
     module.eks,
-    helm_release.aws_alb_controller
+    helm_release.aws_alb_controller, 
+    null_resource.update_kubeconfig
   ]
-}
-resource "helm_release" "helm_test_nginx" {
-  name             = "nginx-test"
-  repository       = "https://charts.bitnami.com/bitnami"
-  chart            = "nginx"
-  version          = "15.12.1"   # ← SPECIFY THIS! Important
-  namespace        = "default"
-  create_namespace = true
 }
