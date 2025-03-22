@@ -27,7 +27,7 @@ module "vpc" {
 # ─────────────────────────────────────────────
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "20.8.3"
+  version = "20.34.0"
 
   cluster_name    = var.cluster_name
   cluster_version = "1.32"
@@ -63,53 +63,10 @@ resource "null_resource" "update_kubeconfig" {
   triggers = {
     always_run = timestamp()
   }
-  depends_on = [module.eks]
-}
-# ─────────────────────────────────────────────
-# Wait for EKS API DNS to become resolvable
-# ─────────────────────────────────────────────
-resource "null_resource" "wait_for_dns" {
-  provisioner "local-exec" {
-    command = <<EOT
-    for i in {1..10}; do
-      nslookup ${module.eks.cluster_endpoint} && exit 0
-      echo "Waiting for EKS endpoint DNS to resolve..."
-      sleep 30
-    done
-    echo "EKS DNS still not resolvable after retries!" && exit 1
-    EOT
-  }
-  depends_on = [module.eks]
-}
-
-# ─────────────────────────────────────────────
-# EKS AWS Auth ConfigMap 
-# ──────────────────────────────────────────
-module "eks_aws_auth" {
-  source  = "terraform-aws-modules/eks/aws//modules/aws-auth"
-  version = "20.8.3"
-  manage_aws_auth_configmap = true
-  aws_auth_users = [
-    {
-      userarn  = "arn:aws:iam::992382545251:user/itaimoshe"
-      username = "itaimoshe"
-      groups   = ["system:masters"]
-    },
-    {
-      userarn  = "arn:aws:iam::992382545251:user/eladsopher"
-      username = "eladsopher"
-      groups   = ["system:masters"]
-    }
+    depends_on = [
+    module.eks
   ]
-  providers = {
-    kubernetes = kubernetes
-  }
-  depends_on = [
-    module.eks,
-    null_resource.update_kubeconfig,
-    null_resource.wait_for_dns
-  ]
-}
+}  
 # ─────────────────────────────────────────────
 # ALB Controller Setup (IRSA, SA, Helm)
 # ─────────────────────────────────────────────
@@ -224,7 +181,7 @@ module "redis_registry" {
 # ─────────────────────────────────────────────
 module "secrets_manager" {
   source        = "../../modules/secrets-manager"
-  secret_name   = "${var.rds_db_name}-credentials"
+  secret_name   = "${var.rds_db_name}-credentials-v2"
   secret_data = {
     username = var.rds_db_username
     password = var.rds_db_password
