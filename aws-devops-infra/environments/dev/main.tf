@@ -3,7 +3,7 @@
 # ─────────────────────────────────────────────
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "5.1.0"
+  version = "5.19.0"
 
   name = var.vpc_name
   cidr = var.vpc_cidr
@@ -67,6 +67,29 @@ resource "null_resource" "update_kubeconfig" {
     module.eks
   ]
 }  
+# Ensure EKS Nodes are Ready BEFORE Helm charts
+resource "null_resource" "wait_for_node_ready" {
+  provisioner "local-exec" {
+    command = <<EOT
+echo "🔄 Waiting for EKS nodes to become Ready..."
+for i in $(seq 1 20); do
+  READY_NODES=$(kubectl get nodes --no-headers 2>/dev/null | grep -c " Ready ")
+  if [ "$READY_NODES" -ge 1 ]; then
+    echo "EKS Nodes are ready!"
+    exit 0
+  fi
+  echo "Still waiting... retry \$i"
+  sleep 15
+done
+echo "Timeout: EKS nodes not ready after waiting!"
+exit 1
+EOT
+  }
+  depends_on = [
+    null_resource.update_kubeconfig,
+    module.eks
+  ]
+}
 # ─────────────────────────────────────────────
 # ALB Controller Setup (IRSA, SA, Helm)
 # ─────────────────────────────────────────────
@@ -110,9 +133,10 @@ resource "helm_release" "aws_alb_controller" {
     name  = "vpcId"
     value = module.vpc.vpc_id
   }
- depends_on = [
+depends_on = [
   module.eks,
-  null_resource.update_kubeconfig
+  null_resource.update_kubeconfig,
+  null_resource.wait_for_node_ready
 ]
 }
 # ─────────────────────────────────────────────
@@ -127,7 +151,7 @@ module "rds_infra" {
 }
 module "rds_postgres" {
   source  = "terraform-aws-modules/rds/aws"
-  version = "6.3.1"
+  version = "6.11.0"
 
   identifier = var.rds_identifier
   engine     = "postgres"
@@ -277,9 +301,10 @@ resource "helm_release" "external_secrets_operator" {
   create_namespace = true
   version          = "0.9.10"
   values = []
-  depends_on = [
-    module.eks,
-    null_resource.update_kubeconfig
+depends_on = [
+  module.eks,
+  null_resource.update_kubeconfig,
+  null_resource.wait_for_node_ready
 ]
 }
 # ─────────────────────────────────────────────
@@ -309,9 +334,10 @@ resource "helm_release" "external_dns" {
     name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
     value = module.external_dns_irsa.externaldns_role_arn
   }
-  depends_on = [
-    module.eks,
-    null_resource.update_kubeconfig
+depends_on = [
+  module.eks,
+  null_resource.update_kubeconfig,
+  null_resource.wait_for_node_ready
 ]
 }
 # ─────────────────────────────────────────────
@@ -346,11 +372,11 @@ set {
     HTTP_Passwd ${var.opensearch_admin_password}
 EOT
 }
-  depends_on = [
-    module.eks,
-    module.opensearch,
-    null_resource.update_kubeconfig
-  ]
+depends_on = [
+  module.eks,
+  null_resource.update_kubeconfig,
+  null_resource.wait_for_node_ready
+]
 }
 # ─────────────────────────────────────────────
 # Prometheus Monitoring Stack
@@ -366,8 +392,9 @@ resource "helm_release" "kube_prometheus_stack" {
     file("${path.module}/../../prometheus/values.yaml") 
   ]
   depends_on = [
-   module.eks,
-   null_resource.update_kubeconfig
+  module.eks,
+  null_resource.update_kubeconfig,
+  null_resource.wait_for_node_ready
 ]
 }
 # ─────────────────────────────────────────────
@@ -430,9 +457,9 @@ resource "helm_release" "statuspage_app" {
     name  = "ingress.servicePort"
     value = "80"
   }
-  depends_on = [
-    module.eks,
-    helm_release.aws_alb_controller, 
-    null_resource.update_kubeconfig
-  ]
+depends_on = [
+  module.eks,
+  null_resource.update_kubeconfig,
+  null_resource.wait_for_node_ready
+]
 }
