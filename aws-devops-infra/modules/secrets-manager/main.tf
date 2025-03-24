@@ -1,6 +1,9 @@
 resource "aws_secretsmanager_secret" "db_secret" {
-  name        = var.secret_name
-  description = "Database credentials for RDS PostgreSQL"
+    name        = var.secret_name
+    description = var.description 
+  lifecycle {
+    prevent_destroy = true
+  }
   tags        = var.tags
 }
 

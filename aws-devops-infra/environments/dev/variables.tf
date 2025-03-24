@@ -122,6 +122,10 @@ variable "project_name" {
   description = "Project-level identifier used for naming"
   type        = string
 }
+# variable "db_name" {
+#   description = "Name prefix for RDS and related resources like secrets"
+#   type        = string
+# }
 
 variable "enable_alb_lookup" {
   description = "Toggle ALB lookup output for WAF module"

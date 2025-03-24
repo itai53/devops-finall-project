@@ -12,3 +12,8 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+variable "description" {
+  type        = string
+  description = "Secret description"
+  default     = "Secret managed by Terraform"
+}

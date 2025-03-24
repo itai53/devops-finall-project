@@ -1,5 +1,5 @@
 # deployment
-replicaCount: 2
+replicaCount: 1
 namespace: default
 nameOverride: statuspage
 appLabel: statuspage
@@ -40,7 +40,6 @@ ingress:
   scheme: internet-facing
   targetType: ip
   listenPorts: '[{"HTTP":80}]'
-  # wafAclId: ${WAF_ACL_ARN}
   loadBalancerName: my-statuspage-alb
   externalDnsHostname: app.imlinfo.xyz
   className: alb
@@ -65,10 +64,8 @@ service:
   protocol: TCP
   selectorLabel: statuspage
 
-# serviceAccoun
+# serviceAccount
 serviceAccount:
   name: external-secrets-sa
   namespace: default
   roleArn: arn:aws:iam::<YOUR_ACCOUNT_ID>:role/eso-secretsmanager-role  # ← Replace this value with a `.Values`-friendly dynamic value if needed  
-# annotations:
-#   wafAclId: "arn:aws:wafv2:us-east-1:123456789012:regional/webacl/your-waf-name/uuid"

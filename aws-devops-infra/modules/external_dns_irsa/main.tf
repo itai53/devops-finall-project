@@ -1,18 +1,17 @@
 resource "aws_iam_role" "external_dns" {
   name = "external-dns-irsa-role"
-
   assume_role_policy = jsonencode({
     Version = "2012-10-17",
     Statement = [
       {
         Effect = "Allow",
         Principal = {
-          Federated = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${var.cluster_oidc_issuer_url}"
+          Federated = var.oidc_provider_arn
         },
         Action = "sts:AssumeRoleWithWebIdentity",
         Condition = {
           StringEquals = {
-            "${var.cluster_oidc_issuer_url}:sub" = "system:serviceaccount:external-dns:external-dns"
+            "${replace(var.oidc_provider_arn, "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/", "")}:sub" = "system:serviceaccount:external-dns:external-dns"
           }
         }
       }

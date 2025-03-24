@@ -1,8 +1,11 @@
-# resource "aws_elasticache_subnet_group" "this" {
-#   name       = "redis-subnet-group"
-#   subnet_ids = var.private_subnet_ids
-# }
-
+resource "aws_cloudwatch_log_group" "redis_slow_log" {
+  name = "/aws/elasticache/devops-redis-EI"
+  retention_in_days = 7
+  tags = var.default_tags
+   lifecycle {
+    prevent_destroy = true
+  }
+}
 resource "aws_security_group" "redis" {
   name        = "redis-sg"
   description = "Redis access security group"
